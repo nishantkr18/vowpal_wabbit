@@ -677,12 +677,6 @@ void setup_example(vw& all, example* ae)
 {
   if (all.example_parser->sort_features && ae->sorted == false) unique_sort_features(all.parse_mask, ae);
 
-  if (all.example_parser->write_cache)
-  {
-    all.example_parser->lbl_parser.cache_label(&ae->l, ae->_reduction_features, *(all.example_parser->output));
-    cache_features(*(all.example_parser->output), ae, all.parse_mask);
-  }
-
   ae->partial_prediction = 0.;
   ae->num_features = 0;
   ae->total_sum_feat_sq = 0;
@@ -937,7 +931,7 @@ void main_parse_loop(vw* all) { parse_dispatch(*all, thread_dispatch); }
 
 namespace VW
 {
-example* get_example(parser* p) { 
+example* get_example(vw& all, parser* p) { 
 
   example* ex = p->ready_parsed_examples.pop();
 
@@ -950,6 +944,12 @@ example* get_example(parser* p) {
     while(ex != nullptr && !*(ex->ex_lock.done_parsing)) {
       ex->ex_lock.example_parsed->wait(lock);
     }
+  }
+
+  if (all.example_parser->write_cache)
+  {
+    all.example_parser->lbl_parser.cache_label(&ex->l, ex->_reduction_features, *(all.example_parser->output));
+    cache_features(*(all.example_parser->output), ex, all.parse_mask);
   }
 
   return ex;

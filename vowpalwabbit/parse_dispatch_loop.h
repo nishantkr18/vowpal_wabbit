@@ -43,15 +43,12 @@ inline void parse_dispatch(vw& all, dispatch_fptr dispatch)
 
       }
       else
-      { 
-
-        reset_source(all, all.num_bits);
+      {
 
         // to call reset source in io thread
         all.example_parser->done_with_io.store(true);
         all.example_parser->can_end_pass.notify_one();
 
-        all.do_reset_source = false;
         all.passes_complete++;
 
         // setup an end_pass example

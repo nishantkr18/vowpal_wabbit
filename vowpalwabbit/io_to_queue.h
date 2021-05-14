@@ -34,6 +34,7 @@ inline void io_lines_toqueue(vw& all){
 
     if (counter_of_number_passes != num_passes_to_complete && num_passes_to_complete > 1) {
       reset_source(all, all.num_bits);
+      all.do_reset_source = false;
 
       // increment current pass in io thread
       all.current_pass++;
