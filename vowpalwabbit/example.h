@@ -73,6 +73,10 @@ struct example_lock
   // NT set to false!!!
   //std::atomic<bool> done_parsing; // flag used in multithreaded parsing to indicate that the example is done being parsed
   std::atomic<bool>* done_parsing;
+  // flag for indicating that cache is ready to be written.
+  std::atomic<bool>* cache_write_ready;
+  // flag for indicating that cache is written.
+  std::atomic<bool>* cache_written;
   //for get_example
   std::condition_variable* example_parsed;
   //for cv notify and wait
@@ -80,6 +84,8 @@ struct example_lock
 
   example_lock()
   : done_parsing(new std::atomic<bool>(false))
+  , cache_write_ready(new std::atomic<bool>(false))
+  , cache_written(new std::atomic<bool>(false))
   , example_parsed(new std::condition_variable)
   , example_cv_mutex(new std::mutex)
   
@@ -87,6 +93,8 @@ struct example_lock
   ~example_lock()
   {
     delete done_parsing;
+    delete cache_write_ready;
+    delete cache_written;
     delete example_parsed;
     delete example_cv_mutex;
   }
@@ -96,18 +104,26 @@ struct example_lock
   example_lock(example_lock&& other)
   {
     done_parsing = other.done_parsing;
+    cache_write_ready = other.cache_write_ready;
+    cache_written = other.cache_written;
     example_parsed = other.example_parsed;
     example_cv_mutex = other.example_cv_mutex;
     other.done_parsing = nullptr;
+    other.cache_write_ready = nullptr;
+    other.cache_written = nullptr;
     other.example_parsed = nullptr;
     other.example_cv_mutex = nullptr;
   }
   example_lock& operator=(example_lock&& other)
   {
     done_parsing = other.done_parsing;
+    cache_write_ready = other.cache_write_ready;
+    cache_written = other.cache_written;
     example_parsed = other.example_parsed;
     example_cv_mutex = other.example_cv_mutex;
     other.done_parsing = nullptr;
+    other.cache_write_ready = nullptr;
+    other.cache_written = nullptr;
     other.example_parsed = nullptr;
     other.example_cv_mutex = nullptr;
     return *this;
