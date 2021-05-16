@@ -938,27 +938,27 @@ example* get_example(vw& all, parser* p) {
   if (ex == nullptr) {
     return ex;
   }
-
-  // Wait for notification that the example is ready to be written to cache.
-  {
-    std::unique_lock<std::mutex> lock(*(ex->ex_lock.example_cv_mutex));
-    while(ex != nullptr && !*(ex->ex_lock.cache_write_ready)) {
-      ex->ex_lock.example_parsed->wait(lock);
-    }
-  }
-
-  // Write to cache.
+  
   if (all.example_parser->write_cache)
   {
+    // Wait for notification that the example is ready to be written to cache.
+    {
+      std::unique_lock<std::mutex> lock(*(ex->ex_lock.example_cv_mutex));
+      while(ex != nullptr && !*(ex->ex_lock.cache_write_ready)) {
+        ex->ex_lock.example_parsed->wait(lock);
+      }
+    }
+
+    // Write to cache.
     all.example_parser->lbl_parser.cache_label(&ex->l, ex->_reduction_features, *(all.example_parser->output));
     cache_features(*(all.example_parser->output), ex, all.parse_mask);
-  }
 
-  // Notify the parser thread that the cache is written.
-  {
-    std::unique_lock<std::mutex> lock(*(ex->ex_lock.example_cv_mutex));
-    ex->ex_lock.cache_written->store(true); 
-    ex->ex_lock.example_parsed->notify_one();
+    // Notify the parser thread that the cache is written.
+    {
+      std::unique_lock<std::mutex> lock(*(ex->ex_lock.example_cv_mutex));
+      ex->ex_lock.cache_written->store(true); 
+      ex->ex_lock.example_parsed->notify_one();
+    }
   }
 
   // Waiting for parser thread to complete parsing.

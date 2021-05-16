@@ -35,18 +35,20 @@ inline void parse_dispatch(vw& all, dispatch_fptr dispatch)
       if (!all.do_reset_source && example_number != all.pass_length && all.max_examples > example_number &&
           all.example_parser->reader(&all, examples, words_localcpy, parse_name_localcpy) > 0)
       {
-
-        // Notify the learner thread that example is ready to be written as cache.
+        if (all.example_parser->write_cache)
         {
-          std::unique_lock<std::mutex> lock(*(example_ptr->ex_lock.example_cv_mutex));
-          example_ptr->ex_lock.cache_write_ready->store(true); 
-          example_ptr->ex_lock.example_parsed->notify_one();
-        }
-        // Wait for the example to be written to cache.
-        {
-          std::unique_lock<std::mutex> lock(*(example_ptr->ex_lock.example_cv_mutex));
-          while(example_ptr != nullptr && !*(example_ptr->ex_lock.cache_written)) {
-            example_ptr->ex_lock.example_parsed->wait(lock);
+          // Notify the learner thread that example is ready to be written as cache.
+          {
+            std::unique_lock<std::mutex> lock(*(example_ptr->ex_lock.example_cv_mutex));
+            example_ptr->ex_lock.cache_write_ready->store(true); 
+            example_ptr->ex_lock.example_parsed->notify_one();
+          }
+          // Wait for the example to be written to cache.
+          {
+            std::unique_lock<std::mutex> lock(*(example_ptr->ex_lock.example_cv_mutex));
+            while(example_ptr != nullptr && !*(example_ptr->ex_lock.cache_written)) {
+              example_ptr->ex_lock.example_parsed->wait(lock);
+            }
           }
         }
 
