@@ -937,7 +937,7 @@ void main_parse_loop(vw* all) { parse_dispatch(*all, thread_dispatch); }
 
 namespace VW
 {
-example* get_example(parser* p) { 
+example* get_example(vw& all, parser* p) { 
 
   example* ex = p->ready_parsed_examples.pop();
 
@@ -951,6 +951,7 @@ example* get_example(parser* p) {
       ex->ex_lock.example_parsed->wait(lock);
     }
   }
+  VW::setup_example(all, ex);
 
   return ex;
 

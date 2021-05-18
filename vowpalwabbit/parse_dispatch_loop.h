@@ -36,9 +36,7 @@ inline void parse_dispatch(vw& all, dispatch_fptr dispatch)
           all.example_parser->reader(&all, examples, words_localcpy, parse_name_localcpy) > 0)
       {
 
-        VW::setup_examples(all, examples);
         example_number += examples.size();
-
         dispatch(all, examples);
 
       }
