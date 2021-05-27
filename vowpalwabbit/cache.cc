@@ -102,14 +102,14 @@ int read_cached_features_single_example(vw* all, example *ae, io_buf *input)
     ae->is_newline = false;
   }
   c += sizeof(newline_indicator);
-  all->example_parser->input->set(c);
+  input->set(c);
   // read indices
   unsigned char num_indices = 0;
   if (input->buf_read(c, sizeof(num_indices)) < sizeof(num_indices)) return 0;
   num_indices = *(unsigned char*)c;
   c += sizeof(num_indices);
 
-  all->example_parser->input->set(c);
+  input->set(c);
   for (; num_indices > 0; num_indices--)
   {
     size_t temp;
@@ -127,7 +127,7 @@ int read_cached_features_single_example(vw* all, example *ae, io_buf *input)
     features& ours = ae->feature_space[index];
     size_t storage = *(size_t*)c;
     c += sizeof(size_t);
-    all->example_parser->input->set(c);
+    input->set(c);
     total += storage;
     if (input->buf_read(c, storage) < storage)
     {
@@ -158,7 +158,7 @@ int read_cached_features_single_example(vw* all, example *ae, io_buf *input)
       last = i;
       ours.push_back(v, i);
     }
-    all->example_parser->input->set(c);
+    input->set(c);
   }
 
   return (int)total;
