@@ -115,10 +115,11 @@ void dealloc_example(void (*delete_label)(polylabel*), example& ec, void (*delet
 void dealloc_examples(example* example_ptr, size_t count);
 
 void parse_example_label(vw& all, example& ec, std::string label);
-void setup_examples(vw& all, v_array<example*>& examples);
+void setup_examples(vw& all, std::vector<example*>& examples);
 void setup_example(vw& all, example* ae);
 example* new_unused_example(vw& all);
-example* get_example(parser* pf);
+std::vector<example*>* get_example(parser* pf);
+void work_on_example(vw& pf, example* ex);
 float get_topic_prediction(example* ec, size_t i);  // i=0 to max topic -1
 float get_label(example* ec);
 float get_importance(example* ec);
@@ -142,6 +143,8 @@ void add_label(example* ec, float label, float weight = 1, float base = 0);
 // notify VW that you are done with the example.
 void finish_example(vw& all, example& ec);
 void finish_example(vw& all, multi_ex& ec);
+void finish_example_vector(vw& all, std::vector<example*>& ev);
+
 void empty_example(vw& all, example& ec);
 
 VW_DEPRECATED("label size or copy_label are no longer used, please use the other overload")

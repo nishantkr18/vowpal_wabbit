@@ -10,57 +10,40 @@ inline void io_lines_toqueue(vw& all){
 
   std::mutex mut;
   std::unique_lock<std::mutex> lock(mut);
-  
-  int num_passes_to_complete = all.numpasses;
- 
-  int counter_of_number_passes = 0;
-  while(counter_of_number_passes++ < num_passes_to_complete) {
-
-    //  zeset done_with_io (set when we are done adding to io) to false at beginning of new pass
-    all.example_parser->done_with_io.store(false);
+   
+  while(!all.example_parser->done) {
 
     char* line = nullptr;
-
     bool should_finish = false;
 
-    while(!should_finish)
-    {   
+    while(!should_finish){
       should_finish = all.example_parser->input_file_reader(all, line);
     }
 
-    while(all.example_parser->done_with_io == false) {
+    while(!all.example_parser->done_with_io) {
       all.example_parser->can_end_pass.wait(lock);
     }
-
-    if (counter_of_number_passes != num_passes_to_complete && num_passes_to_complete > 1) {
-      reset_source(all, all.num_bits);
-
-      // increment current pass in io thread
-      all.current_pass++;
-    }
+    all.example_parser->done_with_io.store(false);
 
   }
 
-  all.example_parser->io_lines.set_done();
-
- 
 }
  
 
 inline bool read_input_file_ascii(vw& all, char *&line) {
  
- size_t num_chars_initial = all.example_parser->input->readto(line, '\n');
+ size_t example_length_bytes = all.example_parser->input->readto(line, '\n');
  
  bool finish = false;
  
   std::vector<char> *byte_array = new std::vector<char>();
-  byte_array->resize(num_chars_initial); // Note: This byte_array is NOT null terminated!
+  byte_array->resize(example_length_bytes); // Note: This byte_array is NOT null terminated!
 
-  memcpy(byte_array->data(), line, num_chars_initial);
+  memcpy(byte_array->data(), line, example_length_bytes);
 
   all.example_parser->io_lines.push(std::move(byte_array));
  
-  if(num_chars_initial <= 0){
+  if(example_length_bytes <= 0){
     finish = true;
   }
  
@@ -69,22 +52,35 @@ inline bool read_input_file_ascii(vw& all, char *&line) {
 }
  
 inline bool read_input_file_binary(vw& all, char *&line) {
- 
- size_t total_num_input_bytes = 0;
- 
- //read_all_data returns the number of bytes successfully read from the input files
- total_num_input_bytes = all.example_parser->input->read_all_data(line, total_num_input_bytes);
- 
- bool finish = true;
- 
-  std::vector<char> *byte_array = new std::vector<char>();
-  byte_array->resize(total_num_input_bytes); // Note: This byte_array is NOT null terminated!
 
-  memcpy(byte_array->data(), line, total_num_input_bytes);
+  size_t example_length_bytes;
+  io_buf* input = all.example_parser->input.get();
+
+  // Return true if no examples found in file.
+  if((*input).buf_read(line, sizeof(example_length_bytes)) < sizeof(example_length_bytes)) {
+    // The end of io_lines should contain a null pointer.
+    std::vector<char> *byte_array = new std::vector<char>();
+    all.example_parser->io_lines.push(std::move(byte_array));
+    return true;
+  }
+  // read the example size.
+  example_length_bytes = *(size_t*)line;
+  line += sizeof(example_length_bytes);
+  all.example_parser->input->set(line);
+  size_t actual_read_bytes = (*input).buf_read(line, example_length_bytes);
+  assert(actual_read_bytes = example_length_bytes);
+
+  std::vector<char> *byte_array = new std::vector<char>();
+  byte_array->resize(example_length_bytes); // Note: This byte_array is NOT null terminated!
+
+  memcpy(byte_array->data(), line, example_length_bytes);
+  line += example_length_bytes;
+  all.example_parser->input->set(line);
+
 
   all.example_parser->io_lines.push(std::move(byte_array));
- 
- return finish;
+
+  return false;
 
 }
  

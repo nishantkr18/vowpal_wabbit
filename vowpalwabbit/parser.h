@@ -34,6 +34,7 @@ struct parser
 {
   parser(size_t ring_size, bool strict_parse_, int num_parse_threads)
       : example_pool{ring_size}
+      , example_vector_pool{ring_size}
       , ready_parsed_examples{ring_size}
       , ring_size{ring_size}
       , begin_parsed_examples(0)
@@ -56,13 +57,14 @@ struct parser
   std::vector<VW::string_view> words;
 
   VW::object_pool<example> example_pool;
-  VW::ptr_queue<example> ready_parsed_examples;
+  VW::object_pool<std::vector<example*>> example_vector_pool;
+  VW::ptr_queue<std::vector<example*>> ready_parsed_examples;
 
   std::unique_ptr<io_buf> input;  // Input source(s)
   /// reader consumes the input io_buf in the vw object and is generally for file based parsing
-  int (*reader)(vw*, v_array<example*>& examples, std::vector<VW::string_view>& words, std::vector<VW::string_view>& parse_name);
+  int (*reader)(vw*, std::vector<example*>& examples, std::vector<VW::string_view>& words, std::vector<VW::string_view>& parse_name, std::vector<char>* io_lines_next_item);
   /// text_reader consumes the char* input and is for text based parsing
-  void (*text_reader)(vw*, const char*, size_t, v_array<example*>&);
+  void (*text_reader)(vw*, const char*, size_t, std::vector<example*>&);
 
   bool (*input_file_reader)(vw& vw, char*& line);
 
@@ -116,7 +118,6 @@ struct parser
 
   VW::ptr_queue<std::vector<char>> io_lines;
   std::atomic<bool> done_with_io{false};
-
   // for passes
   std::condition_variable can_end_pass;
 
@@ -140,4 +141,4 @@ void set_compressed(parser* par);
 
 void free_parser(vw& all);
 
-void notify_examples_cv(vw& all, example *& ex);
+void notify_examples_cv(example *& ex);

@@ -21,31 +21,6 @@
 
 namespace logger = VW::io::logger;
 
-size_t read_features(vw *all, std::vector<char>& line, size_t&, v_array<example*>& examples)
-{
-  std::vector<char> *io_lines_next_item;
-
-  {
-    std::lock_guard<std::mutex> lck((*all).example_parser->parser_mutex);
-    
-    io_lines_next_item = all->example_parser->io_lines.pop();
-
-    if(io_lines_next_item != nullptr) {
-      (*all).example_parser->ready_parsed_examples.push(examples[0]);
-    } else {
-      return 0;
-    }
-
-  }
-
-  // only get here if io_lines_next_item != nullptr
-  line = std::move(*io_lines_next_item);
-  delete io_lines_next_item;
-
-  return line.size();
-
-}
-
 size_t strip_features_string(char*& line, size_t num_chars_init){
 
   if (num_chars_init < 1) return num_chars_init;
@@ -63,17 +38,13 @@ size_t strip_features_string(char*& line, size_t num_chars_init){
   return num_chars;
 }
 
-int read_features_string(vw* all, v_array<example*>& examples, std::vector<VW::string_view>& words, std::vector<VW::string_view>& parse_name)
+int read_features_string(vw* all, std::vector<example*>& examples, std::vector<VW::string_view>& words, std::vector<VW::string_view>& parse_name, std::vector<char> *io_lines_next_item)
 {
   // this needs to outlive the string_views pointing to it
-  std::vector<char> line;
   size_t num_chars;
-  size_t num_chars_initial;
+  size_t num_chars_initial = (*io_lines_next_item).size();
 
-  // a line is popped off of the io queue in read_features
-  num_chars_initial = read_features(all, line, num_chars, examples);
-
-  char *stripped_line = std::move(line.data());
+  char *stripped_line = (*io_lines_next_item).data();
   num_chars = strip_features_string(stripped_line, num_chars_initial);
   if (num_chars < 1)
   {
@@ -581,7 +552,7 @@ void read_line(vw& all, example* ex, VW::string_view line)
 
 void read_line(vw& all, example* ex, char* line) { return read_line(all, ex, VW::string_view(line)); }
 
-void read_lines(vw* all, const char* line, size_t /*len*/, v_array<example*>& examples)
+void read_lines(vw* all, const char* line, size_t /*len*/, std::vector<example*>& examples)
 {
   std::vector<VW::string_view> lines;
   tokenize('\n', line, lines);

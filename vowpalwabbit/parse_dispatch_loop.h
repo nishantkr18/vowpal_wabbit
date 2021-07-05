@@ -12,15 +12,16 @@
 
 #include "io/logger.h"
 
-using dispatch_fptr = std::function<void(vw&, const v_array<example*>&)>;
+using dispatch_fptr = std::function<void(vw&, const std::vector<example*>&)>;
 struct io_state;
 
 inline void parse_dispatch(vw& all, dispatch_fptr dispatch)
 {
-  v_array<example*> examples;
+  
   size_t example_number = 0;  // for variable-size batch learning algorithms
 
-  // for substring_to_example
+  // we need to allow reuse of vectors, instead of deleting and recreating them for each example.
+  // used in substring_to_example.
   std::vector<VW::string_view> words_localcpy;
   std::vector<VW::string_view> parse_name_localcpy;
 
@@ -28,50 +29,46 @@ inline void parse_dispatch(vw& all, dispatch_fptr dispatch)
   {
     while (!all.example_parser->done)
     {
-
       example* example_ptr = &VW::get_unused_example(&all);
-      examples.push_back(example_ptr);
+      std::vector<example*>* examples = &VW::get_unused_example_vector(&all);
+      (*examples).push_back(example_ptr);
 
-      if (!all.do_reset_source && example_number != all.pass_length && all.max_examples > example_number &&
-          all.example_parser->reader(&all, examples, words_localcpy, parse_name_localcpy) > 0)
+      bool is_null_pointer = false;
+
+      // This logic should be outside the reader, as:
+      // 1. it is common to all types of parsers.
+      // 2. the type of parser might change when the thread is waiting for a pop of io_lines.
+      std::vector<char> *io_lines_next_item = nullptr;
       {
+        std::lock_guard<std::mutex> lck(all.example_parser->parser_mutex);
+        
+        io_lines_next_item = all.example_parser->io_lines.pop();
 
-        VW::setup_examples(all, examples);
-        example_number += examples.size();
-
-        dispatch(all, examples);
-
-      }
-      else
-      { 
-
-        reset_source(all, all.num_bits);
-
-        // to call reset source in io thread
-        all.example_parser->done_with_io.store(true);
-        all.example_parser->can_end_pass.notify_one();
-
-        all.do_reset_source = false;
-        all.passes_complete++;
-
-        // setup an end_pass example
-        all.example_parser->lbl_parser.default_label(&examples[0]->l);
-        examples[0]->end_pass = true;
-        all.example_parser->in_pass_counter = 0;
-
-        if (all.passes_complete == all.numpasses && example_number == all.pass_length)
-        {
-          all.passes_complete = 0;
-          all.pass_length = all.pass_length * 2 + 1;
+        if(io_lines_next_item != nullptr) {
+          all.example_parser->ready_parsed_examples.push(examples);
         }
-
-        dispatch(all, examples);  // must be called before lock_done or race condition exists.
-        if (all.passes_complete >= all.numpasses && all.max_examples >= example_number) lock_done(*all.example_parser);
-        example_number = 0;
-
       }
 
-      examples.clear();
+
+      if(io_lines_next_item == nullptr) {
+        VW::finish_example(all, *example_ptr);
+        VW::finish_example_vector(all, *examples);
+      }
+
+      else{
+        int num_chars_read = all.example_parser->reader(&all, *examples, words_localcpy, parse_name_localcpy, io_lines_next_item);
+
+        if(num_chars_read > 0){
+          dispatch(all, *examples);
+        }
+        else if(num_chars_read == 0){
+          example_ptr->end_pass = true;
+          dispatch(all, *examples);
+        }
+      }     
+      delete io_lines_next_item;
+
+
     }
 
   }

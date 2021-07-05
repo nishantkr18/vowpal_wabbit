@@ -90,8 +90,13 @@ void drain_examples(vw& all)
 {
   if (all.early_terminate)
   {  // drain any extra examples from parser.
-    example* ec = nullptr;
-    while ((ec = VW::get_example(all.example_parser)) != nullptr) VW::finish_example(all, *ec);
+    std::vector<example*>* ev = nullptr;
+    while ((ev = VW::get_example(all.example_parser)) != nullptr){
+      for (auto ex: *ev)
+        VW::finish_example(all, *ex);
+      VW::finish_example_vector(all, *ev);
+    }
+    
   }
   all.l->end_examples();
 }
@@ -142,16 +147,23 @@ class single_example_handler
 public:
   single_example_handler(const context_type& context) : _context(context) {}
 
-  void on_example(example* ec)
+  void on_example(std::vector<example*>* ev)
   {
-    if (ec->indices.size() > 1)  // 1+ nonconstant feature. (most common case first)
-      _context.template process<example, learn_ex>(*ec);
-    else if (ec->end_pass)
-      _context.template process<example, end_pass>(*ec);
-    else if (is_save_cmd(ec))
-      _context.template process<example, save>(*ec);
-    else
-      _context.template process<example, learn_ex>(*ec);
+    for (example* ec : *ev)
+    {
+      work_on_example(_context.get_master(), ec);
+
+      if (ec->indices.size() > 1)  // 1+ nonconstant feature. (most common case first)
+        _context.template process<example, learn_ex>(*ec);
+      else if (ec->end_pass)
+        _context.template process<example, end_pass>(*ec);
+      else if (is_save_cmd(ec))
+        _context.template process<example, save>(*ec);
+      else
+        _context.template process<example, learn_ex>(*ec);
+    }
+    
+    VW::finish_example_vector(_context.get_master(), *ev);
   }
 
 private:
@@ -196,13 +208,20 @@ public:
     if (!ec_seq.empty()) { _context.template process<multi_ex, learn_multi_ex>(ec_seq); }
   }
 
-  void on_example(example* ec)
+  void on_example(std::vector<example*>* ev)
   {
-    if (try_complete_multi_ex(ec))
+    for (example* ec : *ev)
     {
-      _context.template process<multi_ex, learn_multi_ex>(ec_seq);
-      ec_seq.clear();
+      work_on_example(_context.get_master(), ec);
+      
+      if (try_complete_multi_ex(ec))
+      {
+        _context.template process<multi_ex, learn_multi_ex>(ec_seq);
+        ec_seq.clear();
+      }
     }
+    
+    VW::finish_example_vector(_context.get_master(), *ev);
   }
 
 private:
@@ -215,9 +234,9 @@ private:
 class ready_examples_queue
 {
 public:
-  ready_examples_queue(vw& master) : _master(master) {}
+  ready_examples_queue(vw& master) : _master(master){}
 
-  example* pop() { return !_master.early_terminate ? VW::get_example(_master.example_parser) : nullptr; }
+  std::vector<example*>* pop() { return !_master.early_terminate ? VW::get_example(_master.example_parser) : nullptr; }
 
 private:
   vw& _master;
@@ -226,21 +245,21 @@ private:
 class custom_examples_queue
 {
 public:
-  custom_examples_queue(v_array<example*> examples) : _examples(examples) {}
+  custom_examples_queue(std::vector<example*> examples) : _examples(examples) {}
 
   example* pop() { return _index < _examples.size() ? _examples[_index++] : nullptr; }
 
 private:
-  v_array<example*> _examples;
+  std::vector<example*> _examples;
   size_t _index{0};
 };
 
 template <typename queue_type, typename handler_type>
 void process_examples(queue_type& examples, handler_type& handler)
 {
-  example* ec;
+  std::vector<example*>* ev;
 
-  while ((ec = examples.pop()) != nullptr) handler.on_example(ec);
+  while ((ev = examples.pop()) != nullptr) handler.on_example(ev);
 }
 
 template <typename context_type>
@@ -280,12 +299,12 @@ void generic_driver_onethread(vw& all)
 {
   single_instance_context context(all);
   handler_type handler(context);
-  auto multi_ex_fptr = [&handler](vw& all, v_array<example*> examples) {
+  auto multi_ex_fptr = [&handler](vw& all, std::vector<example*> examples) {
     all.example_parser->end_parsed_examples += examples.size();  // divergence: lock & signal
-    custom_examples_queue examples_queue(examples);
-    process_examples(examples_queue, handler);
+    // custom_examples_queue examples_queue(examples);
+    // process_examples(examples_queue, handler);
   };
-  parse_dispatch(all, multi_ex_fptr);
+  // parse_dispatch(all, multi_ex_fptr);
   all.l->end_examples();
 }
 

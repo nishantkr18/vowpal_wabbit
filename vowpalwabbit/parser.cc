@@ -623,7 +623,20 @@ void enable_sources(vw& all, bool quiet, size_t passes, input_options& input_opt
 
 void lock_done(parser& p)
 {
+  // p.last_pass_complete.store(true);
+
+  // To notify the other parser threads that they can continue their job.
+  // p.done_with_end_pass.store(true);
+  // p.can_end_pass_parser.notify_all();
   p.done = true;
+
+  // lock_done() can be called by the learner thread when the examples have reached the maximum pass allowed.
+  // So, in such a condition, an un-timely end of the program is triggered.
+  // That is why, we release the io_thread in such un-timely situations.
+  p.done_with_io.store(true);
+  p.can_end_pass.notify_one();
+
+  p.io_lines.set_done();
   // in case get_example() is waiting for a fresh example, wake so it can realize there are no more.
   p.ready_parsed_examples.set_done();
   // set ready_parsed = true so that the CV in get_example() is not waiting, since there is nothing else to wait for
@@ -668,9 +681,17 @@ example& get_unused_example(vw* all)
   return *ex;
 }
 
-void setup_examples(vw& all, v_array<example*>& examples)
+std::vector<example*>& get_unused_example_vector(vw* all)
+{
+  parser* p = all->example_parser;
+  auto ex_vector = p->example_vector_pool.get_object();
+  return *ex_vector;
+}
+
+void setup_examples(vw& all, std::vector<example*>& examples)
 {
   for (example* ae : examples) setup_example(all, ae);
+  all.example_parser->end_parsed_examples += examples.size();
 }
 
 void setup_example(vw& all, example* ae)
@@ -679,8 +700,25 @@ void setup_example(vw& all, example* ae)
 
   if (all.example_parser->write_cache)
   {
-    all.example_parser->lbl_parser.cache_label(&ae->l, ae->_reduction_features, *(all.example_parser->output));
-    cache_features(*(all.example_parser->output), ae, all.parse_mask);
+    size_t cached_example_size = 0;
+    char* c;
+
+    io_buf* output = all.example_parser->output.get();
+    
+    // Allocate space for example size in buffer.
+    (*(output)).buf_write(c, sizeof(size_t)); 
+
+    // write in the example.
+    all.example_parser->lbl_parser.cache_label(&ae->l, ae->_reduction_features, *(output));
+    cache_features(*(output), ae, all.parse_mask);
+
+    char* head;
+    (*(output)).buf_write(head, 0);
+    cached_example_size = head - c - sizeof(size_t);
+    // Write the size of the example to the allocated space in the beginning.
+    memcpy(c, &cached_example_size, sizeof(cached_example_size));
+    
+    all.example_parser->output->flush();
   }
 
   ae->partial_prediction = 0.;
@@ -925,35 +963,75 @@ void finish_example(vw& all, example& ec)
     all.example_parser->output_done.notify_one();
   }
 }
+
+void finish_example_vector(vw& all, std::vector<example*>& ev)
+{
+  ev.clear();
+  all.example_parser->example_vector_pool.return_object(&ev);
+}
 }  // namespace VW
 
-void thread_dispatch(vw& all, const v_array<example*>& examples)
+void thread_dispatch(vw& all, const std::vector<example*>& examples)
 {
-  all.example_parser->end_parsed_examples += examples.size();
-  notify_examples_cv(examples[0]);
+  for (auto example : examples) notify_examples_cv(example);
 }
 
 void main_parse_loop(vw* all) { parse_dispatch(*all, thread_dispatch); }
 
 namespace VW
 {
-example* get_example(parser* p) { 
+std::vector<example*>* get_example(parser* p) { 
 
-  example* ex = p->ready_parsed_examples.pop();
+  std::vector<example*>* ev = p->ready_parsed_examples.pop();
 
-  if (ex == nullptr) {
-    return ex;
+  if (ev == nullptr) {
+    return ev;
   }
 
+  // Frankly, we can take any example in the vector of examples. If one of them is parsed, we can rest assured that all are.
+  example* ex = (*ev)[0];
   {
     std::unique_lock<std::mutex> lock(*(ex->ex_lock.example_cv_mutex));
-    while(ex != nullptr && !*(ex->ex_lock.done_parsing)) {
+    while(ev != nullptr && !*(ex->ex_lock.done_parsing)) {
       ex->ex_lock.example_parsed->wait(lock);
     }
   }
 
-  return ex;
+  return ev;
 
+}
+
+void work_on_example(vw& all, example* ex) {
+  // After parsing the example, we set it up, if the example is not end pass.
+  if (!ex->end_pass){
+    VW::setup_example(all, ex);
+  }
+
+  // if it is end_pass, we execute the end pass sequence
+  else{
+    reset_source(all, all.num_bits);
+    // all.do_reset_source = false;
+    all.passes_complete++;
+
+    // setup an end_pass example
+    all.example_parser->lbl_parser.default_label(&ex->l);
+    all.example_parser->in_pass_counter = 0;
+
+    // if (all.passes_complete == all.numpasses && example_number == all.pass_length)
+    // {
+    //   all.passes_complete = 0;
+    //   all.pass_length = all.pass_length * 2 + 1;
+    // }
+
+
+    
+    if (all.passes_complete >= all.numpasses) lock_done(*all.example_parser);
+    // example_number = 0;
+
+    // to call reset source in io thread
+    all.example_parser->done_with_io.store(true);
+    all.example_parser->can_end_pass.notify_one();
+  }
 }
 
 float get_topic_prediction(example* ec, size_t i) { return ec->pred.scalars[i]; }
@@ -1044,7 +1122,9 @@ void free_parser(vw& all)
   {
     auto* current = all.example_parser->ready_parsed_examples.pop();
     // this function also handles examples that were not from the pool.
-    VW::finish_example(all, *current);
+    for (auto ex: *current)
+      VW::finish_example(all, *ex);
+    VW::finish_example_vector(all, *current);
   }
 
   // There should be no examples in flight at this point.
